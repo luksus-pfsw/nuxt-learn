@@ -38,20 +38,24 @@ EventMaster to aplikacja do tworzenia i przeglądania wydarzeń (eventów), podo
 W przeciwieństwie do standardowych aplikacji, EventMaster wykorzystuje **architekturę CQRS** (Command Query Responsibility Segregation), co oznacza:
 - **Osobny tor** dla tworzenia danych (komendy)
 - **Osobny tor** dla odczytywania danych (zapytania)
-- **Dwie różne bazy danych** optymalizowane pod różne cele
+- **Dwie osobne tabele** w bazie danych optymalizowane pod różne cele
 
 To jak gdybyś miał dwa różne notesy: jeden do pisania notatek, drugi do ich czytania, każdy z inną strukturą, żeby było najwydajniej.
+
+**Uwaga o implementacji:** W obecnej wersji EventMaster używamy jednej bazy PostgreSQL z dwiema oddzielnymi tabelami (`events` dla zapisu, `event_view` dla odczytu). To uproszczenie na etapie MVP - w produkcji można rozdzielić na osobne bazy danych.
 
 ### 1.3 Technologie
 
 ```
 Backend:  Java 21 + Spring Boot 3.3.1
 Frontend: Nuxt 4 + Vue 3 + TypeScript
-Message Broker: Apache Kafka
-Write Database: PostgreSQL
-Read Database: CockroachDB
+Message Broker: Redpanda (Kafka-compatible)
+Database: PostgreSQL 16
+  - Write Model: tabela "events"
+  - Read Model: tabela "event_view"
 Auth: Keycloak (OAuth2/OIDC)
 Proxy: Caddy
+Testing: Testcontainers (PostgreSQL, Keycloak, Redpanda)
 ```
 
 ---
@@ -75,8 +79,8 @@ graph LR
     A[Użytkownik tworzy event] --> B[Komenda]
     C[Użytkownik przegląda eventy] --> D[Zapytanie]
     
-    B --> E[Baza Zapisu<br/>PostgreSQL<br/>Skomplikowana struktura]
-    D --> F[Baza Odczytu<br/>CockroachDB<br/>Prosta struktura]
+    B --> E[Tabela: events<br/>PostgreSQL<br/>Write Model<br/>Zarządzana przez Flyway]
+    D --> F[Tabela: event_view<br/>PostgreSQL<br/>Read Model<br/>Zarządzana przez Hibernate]
     
     style B fill:#ff6b6b
     style D fill:#51cf66
@@ -109,24 +113,26 @@ C4Context
     System_Boundary(eventmaster, "EventMaster System") {
         System(frontend, "Frontend Nuxt.js", "Interfejs użytkownika")
         System(backend, "Backend Spring Boot", "Logika biznesowa")
-        System(kafka, "Apache Kafka", "Message Broker")
+        System(redpanda, "Redpanda", "Message Broker (Kafka-compatible)")
     }
     
     System_Ext(keycloak, "Keycloak", "Serwer autoryzacji OAuth2")
-    SystemDb(postgres, "PostgreSQL", "Baza zapisu (Write Model)")
-    SystemDb(cockroach, "CockroachDB", "Baza odczytu (Read Model)")
+    SystemDb(postgres, "PostgreSQL", "Baza danych (Write + Read Model)")
     
     Rel(user, frontend, "Używa", "HTTPS")
     Rel(frontend, backend, "Wywołuje API", "HTTP/REST")
     Rel(frontend, keycloak, "Loguje się", "OAuth2/OIDC")
     
-    Rel(backend, kafka, "Publikuje/Konsumuje", "Kafka Protocol")
-    Rel(backend, postgres, "Zapisuje", "JDBC")
-    Rel(backend, cockroach, "Odczytuje", "JDBC")
+    Rel(backend, redpanda, "Publikuje/Konsumuje", "Kafka Protocol")
+    Rel(backend, postgres, "Zapisuje i Odczytuje", "JDBC")
     Rel(backend, keycloak, "Waliduje token", "JWT")
     
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
 ```
+
+**Uwaga:** PostgreSQL przechowuje dwie oddzielne tabele:
+- `events` - Write Model (zarządzana przez Flyway)
+- `event_view` - Read Model (zarządzana przez Hibernate)
 
 ### 3.2 Główne komponenty
 
@@ -134,9 +140,8 @@ C4Context
 |-----------|------|-------------|------|
 | **Frontend** | Interfejs użytkownika, formularze, wyświetlanie listy | Nuxt 4, Vue 3, TypeScript | 3000 |
 | **Backend** | Logika biznesowa, walidacja, przetwarzanie komend | Spring Boot 3, Java 21 | 8080 |
-| **Kafka** | Kolejka wiadomości, event bus | Apache Kafka | 9092 |
-| **PostgreSQL** | Baza danych zapisu (Write Model) | PostgreSQL 16 | 5432 |
-| **CockroachDB** | Baza danych odczytu (Read Model) | CockroachDB v23.2 | 26257 |
+| **Redpanda** | Kolejka wiadomości, event bus (Kafka-compatible) | Redpanda | 19092 (ext), 9092 (int) |
+| **PostgreSQL** | Baza danych (Write + Read Model w osobnych tabelach) | PostgreSQL 16 | 5432 |
 | **Keycloak** | Serwer autoryzacji, logowanie użytkowników | Keycloak | 8180 |
 | **Caddy** | Reverse proxy, routing HTTP | Caddy | 80/443 |
 
@@ -159,12 +164,11 @@ graph TB
         end
         
         subgraph "Warstwa komunikacji"
-            KAFKA[Apache Kafka<br/>Port 9092]
+            REDPANDA[Redpanda<br/>Port 19092 external<br/>Port 9092 internal]
         end
         
         subgraph "Warstwa danych"
-            PG[(PostgreSQL<br/>Write DB<br/>Port 5432)]
-            CRDB[(CockroachDB<br/>Read DB<br/>Port 26257)]
+            PG[(PostgreSQL<br/>Tabela: events Write<br/>Tabela: event_view Read<br/>Port 5432)]
         end
         
         subgraph "Warstwa bezpieczeństwa"
@@ -182,19 +186,25 @@ graph TB
     NUXT -.->|OAuth2 Login| KC
     SPRING -.->|JWT Validation| KC
     
-    SPRING -->|Publish/Subscribe| KAFKA
-    SPRING -->|Write| PG
-    SPRING -->|Read| CRDB
+    SPRING -->|Publish/Subscribe| REDPANDA
+    SPRING -->|Write to events table| PG
+    SPRING -->|Read from event_view table| PG
     
     style USER fill:#e1f5ff
     style CADDY fill:#fff4e6
     style NUXT fill:#d0ebff
     style SPRING fill:#ffd8a8
-    style KAFKA fill:#ffc9c9
+    style REDPANDA fill:#ffc9c9
     style PG fill:#d3f9d8
-    style CRDB fill:#d3f9d8
     style KC fill:#e7f5ff
 ```
+
+**Wyjaśnienie zmian względem typowego CQRS:**
+- Zamiast dwóch osobnych baz danych (PostgreSQL + CockroachDB), używamy jednej bazy PostgreSQL z dwiema tabelami
+- To uproszczenie na etapie MVP pozwala łatwiej testować i rozwijać system
+- Write Model: tabela `events` (zarządzana przez Flyway migrations)
+- Read Model: tabela `event_view` (zarządzana przez Hibernate ddl-auto=update)
+- Redpanda to lżejsza alternatywa dla Apache Kafka (Kafka-compatible API)
 
 ### 4.2 Opis każdego kontenera
 
@@ -282,8 +292,8 @@ com.eventmaster.backend/
 │   └── SecurityConfig.java        # Konfiguracja OAuth2 Resource Server
 │
 ├── configs/persistence/
-│   ├── WriteDataSourceConfig.java # Konfiguracja połączenia do PostgreSQL
-│   └── ReadDataSourceConfig.java  # Konfiguracja połączenia do CockroachDB
+│   ├── WriteDataSourceConfig.java # Konfiguracja DataSource dla Write Model
+│   └── ReadDataSourceConfig.java  # Konfiguracja DataSource dla Read Model
 │
 ├── events/
 │   ├── api/
@@ -324,17 +334,23 @@ com.eventmaster.backend/
 
 **Jak komunikuje się?**
 - **HTTP REST API** - Przyjmuje żądania od frontendu
-- **Kafka Producer** - Wysyła komendy i zdarzenia
-- **Kafka Consumer** - Słucha komend i zdarzeń
-- **JDBC** - Łączy się z bazami danych
+- **Redpanda Producer** - Wysyła komendy i zdarzenia (Kafka-compatible API)
+- **Redpanda Consumer** - Słucha komend i zdarzeń
+- **JDBC** - Łączy się z PostgreSQL (dwie tabele: events i event_view)
 
 ---
 
 
-#### 4.2.4 Apache Kafka
+#### 4.2.4 Redpanda (Message Broker)
 
 **Co to jest?**  
-Kafka to "autobus wiadomości" - system kolejkowy, przez który płyną wszystkie komendy i zdarzenia w aplikacji. To jak poczta w firmie - każdy może wysłać list (message) na określony adres (topic), a zainteresowani mogą go odebrać.
+Redpanda to message broker - "autobus wiadomości", przez który płyną wszystkie komendy i zdarzenia w aplikacji. To jak poczta w firmie - każdy może wysłać list (message) na określony adres (topic), a zainteresowani mogą go odebrać.
+
+**Redpanda vs Apache Kafka:**
+- Redpanda jest **kompatybilny z API Kafki** - ten sam protokół, te same biblioteki klienckie
+- **Lżejszy** - nie wymaga Zookeeper, mniej zasobów
+- **Szybszy start** - idealny do developmentu i testów
+- **Łatwiejszy setup** - jedno narzędzie CLI (`rpk`)
 
 **Główne koncepcje:**
 
@@ -342,7 +358,7 @@ Kafka to "autobus wiadomości" - system kolejkowy, przez który płyną wszystki
    - To jak skrzynka pocztowa z nazwą
    - W EventMaster mamy 2 topici:
      - `commands.events.create` - Komendy tworzenia eventów
-     - `domain.events.lifecycle` - Zdarzenia domenowe
+     - `events.lifecycle` - Zdarzenia domenowe (zmieniona nazwa z domain.events.lifecycle)
 
 2. **Producer** (Producent):
    - Komponent który wysyła wiadomości do topicu
@@ -357,24 +373,25 @@ Kafka to "autobus wiadomości" - system kolejkowy, przez który płyną wszystki
    - Każda wiadomość jest przetwarzana przez **jednego** konsumenta z grupy
    - Grupy w EventMaster:
      - `event-command-handler` - Przetwarza komendy
-     - `eventmaster-projectors-crdb` - Projektuje do Read Model
+     - `eventmaster-projectors-crdb` - Projektuje do Read Model (nazwa historyczna)
 
 **Co przechowuje?**
-- Wszystkie wiadomości przez określony czas (domyślnie 7 dni)
+- Wszystkie wiadomości przez określony czas (domyślnie 7 dni w Redpanda)
 - Offset (pozycja) każdego consumera - "który message ostatnio przeczytał"
 
-**Dlaczego używamy Kafki?**
+**Dlaczego używamy Redpanda?**
 1. **Asynchroniczność**: Nie musimy czekać na przetworzenie - zwracamy 202 Accepted od razu
-2. **Niezawodność**: Jeśli backend padnie, wiadomości czekają w Kafce
+2. **Niezawodność**: Jeśli backend padnie, wiadomości czekają w Redpanda
 3. **Retry**: Automatyczne ponowne próby przy błędach
 4. **Audytowalność**: Wszystkie komendy są zapisane
+5. **Prostota**: Łatwiejszy w setup niż klasyczna Kafka (brak Zookeeper)
 
-**Przepływ przez Kafkę:**
+**Przepływ przez Redpanda:**
 ```mermaid
 graph LR
     A[EventCommandController] -->|Publish| B[Topic: commands.events.create]
     B -->|Subscribe| C[EventCommandHandler]
-    C -->|Publish| D[Topic: domain.events.lifecycle]
+    C -->|Publish| D[Topic: events.lifecycle]
     D -->|Subscribe| E[EventViewProjector]
     
     style A fill:#ffd8a8
@@ -386,10 +403,10 @@ graph LR
 
 ---
 
-#### 4.2.5 PostgreSQL - Write Database
+#### 4.2.5 PostgreSQL - Write Model (tabela `events`)
 
 **Co to jest?**  
-PostgreSQL to relacyjna baza danych używana jako **Write Model** (Model Zapisu). Przechowuje źródło prawdy (source of truth) - prawdziwy, autorytarny stan eventów.
+PostgreSQL to relacyjna baza danych, która w EventMaster przechowuje **zarówno Write Model jak i Read Model** w osobnych tabelach. Najpierw omówimy **Write Model** - tabelę `events`.
 
 **Struktura tabeli `events`:**
 ```sql
@@ -409,12 +426,16 @@ CREATE TABLE events (
 
 **Kto zapisuje dane?**
 - Tylko `EventCommandHandler` (przez `EventRepository`)
-- **NIE** jest używana do odczytu przez frontend
+- Tabela zarządzana przez **Flyway migrations**
+
+**Lokalizacja migracji:**
+`src/main/resources/db/migration/V1__create_events_table.sql`
 
 **Dlaczego PostgreSQL?**
 - Silne gwarancje ACID (Atomicity, Consistency, Isolation, Durability)
 - Dobre wsparcie dla transakcji
-- Flyway do migracji schematów
+- Flyway do kontrolowanej ewolucji schematu
+- Popularny, dobrze wspierany, solidny
 
 **Konfiguracja:**
 ```java
@@ -428,14 +449,19 @@ CREATE TABLE events (
 
 ---
 
-#### 4.2.6 CockroachDB - Read Database
+#### 4.2.6 PostgreSQL - Read Model (tabela `event_view`)
 
 **Co to jest?**  
-CockroachDB to rozproszona baza danych SQL używana jako **Read Model** (Model Odczytu). Jest zoptymalizowana pod szybkie odczyty.
+Ta sama baza PostgreSQL, ale **osobna tabela** `event_view` zoptymalizowana pod odczyty. To uproszczenie architektury - w klasycznym CQRS byłaby to osobna baza danych (np. CockroachDB, Cassandra).
 
-**Struktura tabeli `event_views`:**
+**Dlaczego jedna baza?**
+- **Uproszczenie na etapie MVP** - łatwiejsze testowanie i rozwój
+- **Nadal CQRS** - separacja logiczna (różne tabele, różne repository, różne DataSource beany)
+- **Łatwa migracja** - w produkcji możemy rozdzielić na osobne bazy bez zmian w kodzie
+
+**Struktura tabeli `event_view`:**
 ```sql
-CREATE TABLE event_views (
+CREATE TABLE event_view (
     event_id UUID PRIMARY KEY,       -- Taki sam ID jak w Write Model
     title VARCHAR(255),              -- Tytuł (denormalizowany)
     description TEXT,                -- Opis (denormalizowany)  
@@ -444,8 +470,8 @@ CREATE TABLE event_views (
 );
 
 -- Możliwe dodatkowe indeksy dla szybkiego wyszukiwania:
-CREATE INDEX idx_event_date ON event_views(event_date);
-CREATE INDEX idx_organizer ON event_views(organizer_id);
+CREATE INDEX idx_event_view_date ON event_view(event_date);
+CREATE INDEX idx_event_view_organizer ON event_view(organizer_id);
 ```
 
 **Co przechowuje?**
@@ -454,20 +480,16 @@ CREATE INDEX idx_organizer ON event_views(organizer_id);
 
 **Kto zapisuje dane?**
 - Tylko `EventViewProjector` (przez `EventViewRepository`)
+- Tabela zarządzana przez **Hibernate** (`ddl-auto=update`)
 
 **Kto czyta dane?**
 - `EventQueryController` (przez `EventViewRepository`)
 - Frontend przez endpoint `GET /api/v1/events`
 
-**Dlaczego CockroachDB?**
-- Skalowalność horyzontalna (możemy dodać więcej węzłów)
-- Wysoka dostępność (high availability)
-- Szybkie odczyty z replik
-
 **Eventual Consistency:**
 ```
-[Zapis do PostgreSQL] ---(kilka ms)---> [Kafka] ---(kilka ms)---> [Zapis do CockroachDB]
-      t=0ms                               t=5ms                         t=10ms
+[Zapis do events] ---(kilka ms)---> [Redpanda] ---(kilka ms)---> [Zapis do event_view]
+      t=0ms                            t=5ms                            t=10ms
 ```
 Użytkownik może nie zobaczyć swojego eventu przez ~10-50ms po utworzeniu.
 
@@ -479,6 +501,8 @@ Użytkownik może nie zobaczyć swojego eventu przez ~10-50ms po utworzeniu.
     entityManagerFactoryRef = "readEntityManagerFactory",
     transactionManagerRef = "readTransactionManager"
 )
+
+// W testach oba DataSource wskazują na ten sam PostgreSQLContainer
 ```
 
 ---
@@ -642,12 +666,12 @@ public class EventCommandController {
 @RequiredArgsConstructor
 public class EventQueryController {
 
-    // ← Połączenie do Read Model (CockroachDB)
+    // ← Połączenie do Read Model (PostgreSQL - tabela event_view)
     private final EventViewRepository eventViewRepository;
 
     @GetMapping  // ← Obsługuje GET /api/v1/events
     public ResponseEntity<List<EventViewDTO>> getAllEvents() {
-        // 1. Pobierz wszystkie EventView z CockroachDB
+        // 1. Pobierz wszystkie EventView z PostgreSQL (tabela event_view)
         List<EventViewDTO> events = eventViewRepository.findAll()
                 .stream()
                 // 2. Mapuj EventView → EventViewDTO (tylko potrzebne pola)
@@ -668,7 +692,7 @@ public class EventQueryController {
 ```
 1. Frontend → GET /api/v1/events
 2. Controller → eventViewRepository.findAll()
-3. CockroachDB → Zwraca wszystkie rekordy z tabeli event_views
+3. PostgreSQL Read Model → Zwraca wszystkie rekordy z tabeli event_view
 4. Stream → Mapuje EventView na EventViewDTO
 5. Controller → Zwraca 200 OK z listą JSON
 ```
@@ -728,7 +752,7 @@ Spring Kafka automatycznie serializuje do JSON używając Jackson.
 public class EventCommandHandler {
 
     public static final String TOPIC_COMMANDS_EVENTS_CREATE = "commands.events.create";
-    public static final String TOPIC_DOMAIN_EVENTS_LIFECYCLE = "domain.events.lifecycle";
+    public static final String TOPIC_EVENTS_LIFECYCLE = "events.lifecycle";  // ← Uproszczona nazwa topicu
 
     private final EventRepository eventRepository;  // ← Write Model Repository (PostgreSQL)
     private final KafkaTemplate<String, Object> kafkaTemplate;  // ← Do publikacji domain events
@@ -773,7 +797,7 @@ public class EventCommandHandler {
         );
 
         // === KROK 4: Publikacja Domain Event do nowego topicu ===
-        kafkaTemplate.send(TOPIC_DOMAIN_EVENTS_LIFECYCLE, 
+        kafkaTemplate.send(TOPIC_EVENTS_LIFECYCLE,  // ← Uproszczona nazwa topicu
                           command.eventId().toString(), 
                           domainEvent);
         log.info("Published Domain Event {} for event {}", 
@@ -788,11 +812,11 @@ public class EventCommandHandler {
 @Transactional
 public void handleCreateEventCommand(...) {
     // 1. eventRepository.save() - Zapisz do PostgreSQL
-    // 2. kafkaTemplate.send()    - Wyślij domain event do Kafki
+    // 2. kafkaTemplate.send()    - Wyślij domain event do Redpanda
 }
 ```
 PROBLEM: Co jeśli `save()` się powiedzie, ale `send()` rzuci wyjątek?
-- Event będzie w PostgreSQL, ale NIE w CockroachDB (bo brak domain eventu)
+- Event będzie w PostgreSQL Write Model, ale NIE w Read Model (bo brak domain eventu)
 - System będzie w niespójnym stanie!
 
 Dzięki `@Transactional`:
@@ -924,7 +948,7 @@ Domain Events pozwalają na **luźne sprzężenie** (loose coupling) - możemy d
 
 **Lokalizacja:** `com.eventmaster.backend.events.query.projector.EventViewProjector`
 
-**Rola:** Kafka Consumer, który projektuje Domain Events do Read Model (CockroachDB).
+**Rola:** Redpanda Consumer, który projektuje Domain Events do Read Model (PostgreSQL - tabela event_view).
 
 ```java
 @Slf4j
@@ -932,16 +956,16 @@ Domain Events pozwalają na **luźne sprzężenie** (loose coupling) - możemy d
 @RequiredArgsConstructor
 public class EventViewProjector {
 
-    public static final String TOPIC_DOMAIN_EVENTS_LIFECYCLE = "domain.events.lifecycle";
+    public static final String TOPIC_DOMAIN_EVENTS_LIFECYCLE = "events.lifecycle";
 
     private final EventViewRepository eventViewRepository;  // ← Read Model Repository
 
     @KafkaListener(
         topics = TOPIC_DOMAIN_EVENTS_LIFECYCLE,  // ← Topic z domain events
-        groupId = "eventmaster-projectors-crdb"  // ← Osobna grupa konsumentów
+        groupId = "eventmaster-projectors-crdb"  // ← Osobna grupa konsumentów (nazwa historyczna)
     )
     public void handleEventCreated(EventCreatedEvent event) {
-        log.info("Projecting EventCreatedEvent to CockroachDB: {}", event.eventId());
+        log.info("Projecting EventCreatedEvent to Read Model (event_view): {}", event.eventId());
 
         // === Mapowanie Domain Event → Read Model ===
         EventView readModel = new EventView();
@@ -951,15 +975,15 @@ public class EventViewProjector {
         readModel.setEventDate(event.eventDate());
         readModel.setOrganizerId(event.organizerId());
 
-        // === Zapis do CockroachDB ===
+        // === Zapis do PostgreSQL Read Model ===
         try {
             eventViewRepository.save(readModel);
-            log.info("Event View {} saved to Read Model (CockroachDB)", readModel.getEventId());
+            log.info("Event View {} saved to Read Model (event_view)", readModel.getEventId());
         } catch (Exception e) {
-            log.error("Failed to save Event View {} to CockroachDB. Error: {}", 
+            log.error("Failed to save Event View {} to Read Model. Error: {}", 
                      event.eventId(), e.getMessage());
-            // Rzucamy wyjątek → Kafka spróbuje ponownie
-            throw new RuntimeException("CockroachDB persistence failed, triggering retry", e);
+            // Rzucamy wyjątek → Redpanda spróbuje ponownie
+            throw new RuntimeException("Read Model persistence failed, triggering retry", e);
         }
     }
 }
@@ -976,9 +1000,9 @@ Consumer Group: event-command-handler
   ├─ Przetwarza: CreateEventCommand
   └─ Pisze do: PostgreSQL (Write Model)
 
-Consumer Group: eventmaster-projectors-crdb
+Consumer Group: eventmaster-projectors-crdb (nazwa historyczna)
   ├─ Przetwarza: EventCreatedEvent
-  └─ Pisze do: CockroachDB (Read Model)
+  └─ Pisze do: PostgreSQL Read Model (tabela event_view)
 ```
 Dzięki różnym groupId, obie grupy niezależnie konsumują te same wiadomości.
 
@@ -990,7 +1014,7 @@ Dzięki różnym groupId, obie grupy niezależnie konsumują te same wiadomości
 
 ```java
 @Entity
-@Table(name = "event_views")
+@Table(name = "event_view")  // ← Nazwa tabeli w PostgreSQL
 public class EventView {
     @Id
     private UUID eventId;
@@ -1007,7 +1031,7 @@ public class EventView {
 Read Model jest denormalizowany - wszystkie dane w jednej tabeli, żeby odczyt był ultra-szybki:
 ```sql
 -- Jedna prosta SELECT bez JOIN-ów:
-SELECT * FROM event_views ORDER BY event_date DESC;
+SELECT * FROM event_view ORDER BY event_date DESC;
 ```
 
 W przeciwieństwie do Write Model, gdzie moglibyśmy mieć:
@@ -1120,7 +1144,9 @@ spring:
 
 **Lokalizacja:** `com.eventmaster.backend.configs.persistence.ReadDataSourceConfig`
 
-**Rola:** Konfiguruje połączenie do CockroachDB dla Read Model.
+**Rola:** Konfiguruje drugi DataSource bean dla Read Model. W produkcji może wskazywać na osobną bazę danych, w MVP wskazuje na te samą PostgreSQL co Write Model.
+
+**Uwaga:** W aktualnej implementacji (MVP), oba DataSource beany wskazują na tę samą bazę PostgreSQL, ale na różne tabele (`events` vs `event_view`). To uproszczenie, które można łatwo zmienić później na osobne bazy danych.
 
 ```java
 @Configuration
@@ -1144,7 +1170,7 @@ public class ReadDataSourceConfig {
             @Qualifier("readDataSource") DataSource dataSource
     ) {
         Map<String, Object> properties = new HashMap<>();
-        properties.put("hibernate.hbm2ddl.auto", "update");  // ← Auto-update schematu
+        properties.put("hibernate.hbm2ddl.auto", "update");  // ← Auto-update schematu (uproszczenie MVP)
 
         return builder
                 .dataSource(dataSource)
@@ -1163,21 +1189,53 @@ public class ReadDataSourceConfig {
 }
 ```
 
-**Konfiguracja w `application.yml`:**
-```yaml
-spring:
-  datasource:
-    read:
-      url: jdbc:postgresql://localhost:26257/eventmaster_read?sslmode=disable
-      username: root
-      password: ""
-      driver-class-name: org.postgresql.Driver
+**Konfiguracja w `application.properties` (dla MVP - ta sama baza):**
+```properties
+# Read Model DataSource (MVP: ta sama baza co Write Model)
+spring.datasource.read.url=jdbc:postgresql://localhost:5432/eventmaster_db
+spring.datasource.read.username=user
+spring.datasource.read.password=password
+spring.datasource.read.driver-class-name=org.postgresql.Driver
+```
+
+**Konfiguracja dla produkcji (osobna baza):**
+```properties
+# Write Model
+spring.datasource.write.url=jdbc:postgresql://postgres-write.example.com:5432/eventmaster_write
+spring.datasource.write.username=user
+spring.datasource.write.password=secret
+
+# Read Model (osobny serwer - może być MongoDB, CockroachDB, etc.)
+spring.datasource.read.url=jdbc:postgresql://cockroachdb.example.com:26257/eventmaster_read?sslmode=require
+spring.datasource.read.username=root
+spring.datasource.read.password=secret
 ```
 
 **Dlaczego `hibernate.hbm2ddl.auto=update`?**
-- Write Model używa **Flyway** do migracji (kontrolowane przez devów)
+- Write Model używa **Flyway** do migracji (kontrolowane przez devów, versioned)
 - Read Model używa **Hibernate auto-update** (generowane automatycznie z encji)
-- To akceptowalne, bo Read Model jest mniej krytyczny i łatwiej go przebudować
+- To akceptowalne, bo Read Model jest mniej krytyczny i łatwiej go przebudować z Domain Events
+- W produkcji można też użyć Flyway dla Read Model
+
+**Jak działa separacja logiczna?**
+```
+EventRepository (Write)
+  └─> writeEntityManagerFactory
+      └─> writeDataSource
+          └─> PostgreSQL:5432/eventmaster_db (tabela: events)
+
+EventViewRepository (Read)
+  └─> readEntityManagerFactory
+      └─> readDataSource
+          └─> PostgreSQL:5432/eventmaster_db (tabela: event_view)
+                     ↑
+              Ta sama baza w MVP!
+```
+
+Dzięki takiej konfiguracji:
+- ✅ Kod nie wie, że bazy są te same (łatwa migracja później)
+- ✅ Repositories są oddzielone logicznie
+- ✅ Testy mogą łatwo używać jednego PostgreSQLContainer
 
 ---
 
@@ -1389,14 +1447,14 @@ sequenceDiagram
     participant Vue
     participant Caddy
     participant Spring
-    participant CockroachDB
+    participant ReadDB as PostgreSQL Read Model
     
     Browser->>Vue: Otwiera /events
     Vue->>Vue: onMounted() hook
     Vue->>Caddy: GET /api/v1/events
     Caddy->>Spring: Proxy do /api/v1/events
-    Spring->>CockroachDB: SELECT * FROM event_views
-    CockroachDB->>Spring: Zwróć rows
+    Spring->>ReadDB: SELECT * FROM event_view
+    ReadDB->>Spring: Zwróć rows
     Spring->>Caddy: 200 OK + JSON array
     Caddy->>Vue: JSON array
     Vue->>Vue: events.value = data
@@ -1734,11 +1792,11 @@ sequenceDiagram
     participant Caddy as Caddy Proxy
     participant KC as Keycloak
     participant Spring as Spring Backend
-    participant Kafka as Apache Kafka
-    participant PG as PostgreSQL
+    participant Redpanda as Redpanda (Message Broker)
+    participant WriteDB as PostgreSQL Write Model
     participant CH as EventCommandHandler
     participant Proj as EventViewProjector
-    participant CRDB as CockroachDB
+    participant ReadDB as PostgreSQL Read Model
     
     %% === LOGOWANIE ===
     User->>Browser: Otwiera /events/create
@@ -1768,34 +1826,34 @@ sequenceDiagram
     Spring->>KC: Waliduj JWT (JWKS)
     KC->>Spring: Token valid ✅ + subject=user-123
     Spring->>Spring: EventCommandController<br/>Tworzy CreateEventCommand
-    Spring->>Kafka: Publish do "commands.events.create"<br/>Key: event-uuid<br/>Value: {eventId, organizerId, ...}
+    Spring->>Redpanda: Publish do "commands.events.create"<br/>Key: event-uuid<br/>Value: {eventId, organizerId, ...}
     Spring->>Caddy: 202 Accepted
     Caddy->>Nuxt: 202 Accepted
     Nuxt->>Browser: Toast "Przyjęto"<br/>Redirect do /
     
     %% === PRZETWARZANIE KOMENDY ===
-    Note over Kafka,CH: Asynchroniczne przetwarzanie
-    Kafka->>CH: Consume CreateEventCommand
+    Note over Redpanda,CH: Asynchroniczne przetwarzanie
+    Redpanda->>CH: Consume CreateEventCommand
     CH->>CH: handleCreateEventCommand()<br/>Mapuje na Event entity
-    CH->>PG: INSERT INTO events (...)
-    PG->>CH: OK (zapis sukces)
+    CH->>WriteDB: INSERT INTO events (...)
+    WriteDB->>CH: OK (zapis sukces)
     CH->>CH: Tworzy EventCreatedEvent
-    CH->>Kafka: Publish do "domain.events.lifecycle"
+    CH->>Redpanda: Publish do "events.lifecycle"
     
     %% === PROJEKCJA DO READ MODEL ===
-    Kafka->>Proj: Consume EventCreatedEvent
+    Redpanda->>Proj: Consume EventCreatedEvent
     Proj->>Proj: handleEventCreated()<br/>Mapuje na EventView
-    Proj->>CRDB: INSERT INTO event_views (...)
-    CRDB->>Proj: OK (projekcja sukces)
+    Proj->>ReadDB: INSERT INTO event_view (...)
+    ReadDB->>Proj: OK (projekcja sukces)
     
     %% === ODCZYT LISTY ===
-    Note over User,CRDB: Użytkownik odświeża listę
+    Note over User,ReadDB: Użytkownik odświeża listę
     User->>Browser: Otwiera /events
     Browser->>Nuxt: GET /events
     Nuxt->>Caddy: GET /api/v1/events
     Caddy->>Spring: Proxy GET /api/v1/events
-    Spring->>CRDB: SELECT * FROM event_views
-    CRDB->>Spring: Zwróć rows
+    Spring->>ReadDB: SELECT * FROM event_view
+    ReadDB->>Spring: Zwróć rows
     Spring->>Caddy: 200 OK + JSON array
     Caddy->>Nuxt: JSON array
     Nuxt->>Browser: Renderuj listę (w tym nowy event ✅)
@@ -1822,15 +1880,15 @@ sequenceDiagram
     participant Nuxt as Nuxt Frontend
     participant Caddy as Caddy Proxy
     participant Spring as Spring Backend (QueryController)
-    participant CRDB as CockroachDB (Read Model)
+    participant ReadDB as PostgreSQL Read Model (event_view)
     
     User->>Browser: Otwiera /events
     Browser->>Nuxt: GET /events
     Nuxt->>Nuxt: onMounted() hook
     Nuxt->>Caddy: fetch('/api/v1/events')
     Caddy->>Spring: Proxy GET /api/v1/events
-    Spring->>CRDB: SELECT event_id, title, event_date<br/>FROM event_views<br/>ORDER BY event_date DESC
-    CRDB->>Spring: Rows [<br/>  {eventId: uuid1, title: "Koncert", eventDate: "2025-12-31"},<br/>  {eventId: uuid2, title: "Konferencja", eventDate: "2026-01-15"}<br/>]
+    Spring->>ReadDB: SELECT event_id, title, event_date<br/>FROM event_view<br/>ORDER BY event_date DESC
+    ReadDB->>Spring: Rows [<br/>  {eventId: uuid1, title: "Koncert", eventDate: "2025-12-31"},<br/>  {eventId: uuid2, title: "Konferencja", eventDate: "2026-01-15"}<br/>]
     Spring->>Spring: Map EventView → EventViewDTO
     Spring->>Caddy: 200 OK + JSON array
     Caddy->>Nuxt: JSON array
@@ -1849,33 +1907,33 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Kafka
+    participant Redpanda
     participant CH as EventCommandHandler
     participant PG as PostgreSQL
     participant DLQ as Dead Letter Queue
     
-    Kafka->>CH: Consume CreateEventCommand
+    Redpanda->>CH: Consume CreateEventCommand
     CH->>PG: INSERT INTO events (...)
     PG--xCH: ❌ DataIntegrityViolationException<br/>(duplicate UUID)
     CH->>CH: throw RuntimeException
     
-    Note over Kafka,CH: Retry #1 (czekaj 1s)
+    Note over Redpanda,CH: Retry #1 (czekaj 1s)
     
-    Kafka->>CH: Consume CreateEventCommand (ponownie)
+    Redpanda->>CH: Consume CreateEventCommand (ponownie)
     CH->>PG: INSERT INTO events (...)
     PG--xCH: ❌ Nadal duplicate
     CH->>CH: throw RuntimeException
     
-    Note over Kafka,CH: Retry #2 (czekaj 1s)
+    Note over Redpanda,CH: Retry #2 (czekaj 1s)
     
-    Kafka->>CH: Consume CreateEventCommand (ostatnia próba)
+    Redpanda->>CH: Consume CreateEventCommand (ostatnia próba)
     CH->>PG: INSERT INTO events (...)
     PG--xCH: ❌ Nadal duplicate
     CH->>CH: throw RuntimeException
     
-    Note over Kafka,DLQ: Max retries osiągnięte → DLQ
+    Note over Redpanda,DLQ: Max retries osiągnięte → DLQ
     
-    Kafka->>DLQ: Przenieś message do "commands.events.create.DLT"
+    Redpanda->>DLQ: Przenieś message do "commands.events.create.DLT"
     DLQ->>DLQ: Zapisz w DLQ topic (z metadanymi błędu)
 ```
 
@@ -1889,7 +1947,22 @@ sequenceDiagram
 
 ## 8. Bazy danych i separacja modeli
 
-### 8.1 Write Model (PostgreSQL)
+### 8.1 Architektura baz danych w EventMaster
+
+**Kluczowe wyjaśnienie:**
+EventMaster używa **jednej bazy PostgreSQL** z **dwiema osobnymi tabelami**:
+- `events` - Write Model
+- `event_view` - Read Model
+
+To uproszczenie klasycznego CQRS, gdzie zwykle są dwie fizycznie oddzielne bazy danych. Nasze podejście:
+- ✅ Nadal CQRS (separacja logiczna, różne DataSource beany, różne repositories)
+- ✅ Prostsze w testowaniu i developmencie
+- ✅ Łatwa migracja do osobnych baz w produkcji
+- ✅ Te same korzyści CQRS (optymalizacja, skalowalność logiczna)
+
+---
+
+### 8.2 Write Model (PostgreSQL - tabela `events`)
 
 **Schemat tabeli:**
 ```sql
@@ -1923,20 +1996,21 @@ CREATE TABLE events (
 - **Constraints** - Reguły biznesowe na poziomie DB
 - **Minimalne indeksy** - Tylko te potrzebne do lookupów
 - **Source of Truth** - Jedyne źródło prawdy o eventach
+- **Flyway managed** - Schemat kontrolowany przez migracje
 
 **Operacje:**
-- `INSERT` - Tworzenie nowego eventu
+- `INSERT` - Tworzenie nowego eventu (EventCommandHandler)
 - `UPDATE` - Edycja eventu (potencjalne przyszłe feature)
 - `DELETE` - Usuwanie eventu (soft delete preferowane)
 - **BRAK** `SELECT` dla query (tylko internal lookups)
 
 ---
 
-### 8.2 Read Model (CockroachDB)
+### 8.3 Read Model (PostgreSQL - tabela `event_view`)
 
 **Schemat tabeli:**
 ```sql
-CREATE TABLE event_views (
+CREATE TABLE event_view (
     event_id UUID PRIMARY KEY,
     title VARCHAR(255),
     description TEXT,
@@ -1947,56 +2021,82 @@ CREATE TABLE event_views (
 );
 
 -- Indeksy dla szybkich query
-CREATE INDEX idx_event_views_date ON event_views(event_date DESC);
-CREATE INDEX idx_event_views_organizer ON event_views(organizer_id);
-CREATE INDEX idx_event_views_title_search ON event_views USING GIN(to_tsvector('polish', title));
+CREATE INDEX idx_event_view_date ON event_view(event_date DESC);
+CREATE INDEX idx_event_view_organizer ON event_view(organizer_id);
+-- Możliwy full-text search:
+-- CREATE INDEX idx_event_view_title_search ON event_view USING GIN(to_tsvector('polish', title));
 ```
 
 **Charakterystyka Read Model:**
 - **Denormalized** - Wszystko w jednej tabeli (no JOINs)
 - **Eventual consistency** - Może być opóźniony o kilka ms
 - **Multiple indexes** - Optymalizowane pod różne query patterns
-- **Materialized view** - Przechowuje gotowe do wyświetlenia dane
-- **Rebuildable** - Można przebudować z Write Model
+- **Materialized view concept** - Przechowuje gotowe do wyświetlenia dane
+- **Rebuildable** - Można przebudować z domain events
+- **Hibernate managed** - Schemat przez ddl-auto=update (uproszczenie MVP)
 
 **Operacje:**
-- `SELECT` - Wszystkie query z frontendu
-- **BRAK** `INSERT/UPDATE/DELETE` ręcznych (tylko przez projektory)
+- `SELECT` - Wszystkie query z frontendu (EventQueryController)
+- **BRAK** `INSERT/UPDATE/DELETE` ręcznych (tylko przez EventViewProjector)
 
 ---
 
-### 8.3 Porównanie modeli
+### 8.4 Porównanie modeli
 
-| Aspekt | Write Model (PostgreSQL) | Read Model (CockroachDB) |
-|--------|--------------------------|--------------------------|
+| Aspekt | Write Model (events) | Read Model (event_view) |
+|--------|----------------------|-------------------------|
+| **Baza** | PostgreSQL | PostgreSQL (ta sama!) |
 | **Struktura** | Normalized (3NF) | Denormalized |
 | **JOINs** | Tak, przy złożonych relacjach | Nie, wszystko w jednej tabeli |
 | **Indeksy** | Minimalne (szybszy zapis) | Wiele (szybszy odczyt) |
 | **Constraints** | Silne (NOT NULL, UNIQUE, FK) | Luźne |
 | **Operacje** | INSERT, UPDATE, DELETE | SELECT |
+| **Zarządzanie schematem** | Flyway migrations | Hibernate ddl-auto |
+| **Consistency** | Immediate (ACID) | Eventual (async) |
+| **Rebuild** | Trudne (source of truth) | Łatwe (z domain events) |
 | **Consistency** | Immediate (ACID) | Eventual (async) |
 | **Rebuild** | Trudne (source of truth) | Łatwe (z domain events) |
 | **Skalowanie** | Vertical (większa maszyna) | Horizontal (więcej replik) |
 
 ---
 
-### 8.4 Dlaczego dwie bazy?
+### 8.5 Dlaczego jedna baza z dwiema tabelami?
+
+**Dlaczego nie dwie osobne bazy (jak w klasycznym CQRS)?**
+
+1. **Uproszczenie MVP** - Łatwiejszy setup, development i testowanie
+2. **Koszt** - Nie płacimy za dwie bazy w cloud
+3. **Operacyjna prostota** - Jeden backup, jedno połączenie do zarządzania
+4. **Testcontainers** - Jeden PostgreSQLContainer w testach
+5. **Nadal CQRS** - Separacja logiczna jest zachowana!
+
+**Co tracmy vs klasyczny CQRS?**
+- ❌ Niezależna skalowalność baz (nie możemy osobno skalować Read Model)
+- ❌ Różne technologie (nie możemy użyć np. MongoDB dla Read Model)
+- ❌ Geograficzna replikacja tylko Read Model
+
+**Co zyskujemy?**
+- ✅ Prostszy setup i deployment
+- ✅ Łatwiejsze testowanie
+- ✅ Niższy koszt
+- ✅ Łatwa migracja do osobnych baz później (brak zmian w kodzie!)
 
 **Analogia - Biblioteka:**
-- **Write Model** (PostgreSQL) = Katalog biblioteczny (pełne metadata każdej książki)
-  - Tytuł, autor, ISBN, wydawnictwo, data publikacji, kategoria, lokalizacja na półce, etc.
+- **Write Model** (tabela `events`) = Katalog biblioteczny (pełne metadata)
+  - Tytuł, autor, ISBN, wydawnictwo, data publikacji, kategoria, lokalizacja na półce
   - Używany przez bibliotekarzy do dodawania/edycji książek
-  - Złożona struktura, wiele tabel (książki, autorzy, wydawnictwa, kategorie)
+  - Złożona struktura, reguły biznesowe
 
-- **Read Model** (CockroachDB) = Wyświetlacz dla czytelników
+- **Read Model** (tabela `event_view`) = Wyświetlacz dla czytelników
   - Tylko: Tytuł, autor, dostępność
   - Używany przez czytelników do szukania książek
-  - Prosta struktura, jedna tabela, szybkie wyszukiwanie
+  - Prosta struktura, szybkie wyszukiwanie
+
+Obie "bazy" są w tej samej "bibliotece" (PostgreSQL), ale mają różne cele!
 
 ---
 
-
-## 9. Kafka - autobus komunikacyjny
+## 9. Redpanda - autobus komunikacyjny
 
 ### 9.1 Topici w EventMaster
 
@@ -2020,7 +2120,7 @@ CREATE INDEX idx_event_views_title_search ON event_views USING GIN(to_tsvector('
 
 **Konfiguracja:**
 - **Partitions:** 3 (domyślnie, dla równoległego przetwarzania)
-- **Replication Factor:** 1 (dev), 3 (prod)
+- **Replication Factor:** 1 (dev w Redpanda), 3 (prod w Kafka)
 - **Retention:** 7 dni (wiadomości są usuwane po tygodniu)
 
 **Partycjonowanie:**
@@ -2032,7 +2132,7 @@ kafkaTemplate.send(
 );
 ```
 
-Kafka używa KEY do określenia partycji:
+Redpanda (jak Kafka) używa KEY do określenia partycji:
 ```
 hash(eventId) % numberOfPartitions = partition number
 ```
@@ -2041,9 +2141,11 @@ Dzięki temu wszystkie komendy dla tego samego eventu trafiają do tej samej par
 
 ---
 
-#### 9.1.2 Topic: `domain.events.lifecycle`
+#### 9.1.2 Topic: `events.lifecycle`
 
 **Rola:** Event bus dla zdarzeń domenowych (lifecycle eventów).
+
+**Uwaga:** Nazwa została uproszczona z `domain.events.lifecycle` do `events.lifecycle`.
 
 **Producer:** `EventCommandHandler`  
 **Consumers:** 
@@ -2072,11 +2174,11 @@ Dzięki temu wszystkie komendy dla tego samego eventu trafiają do tej samej par
 ### 9.2 Consumer Groups
 
 **Co to jest Consumer Group?**
-To grupa konsumentów pracujących razem nad tym samym topicem. Kafka gwarantuje, że każda wiadomość jest przetwarzana przez **dokładnie jednego** konsumenta z grupy.
+To grupa konsumentów pracujących razem nad tym samym topicem. Redpanda (zgodnie z API Kafki) gwarantuje, że każda wiadomość jest przetwarzana przez **dokładnie jednego** konsumenta z grupy.
 
 ```mermaid
 graph TD
-    A[Topic: domain.events.lifecycle] --> B[Partition 0]
+    A[Topic: events.lifecycle] --> B[Partition 0]
     A --> C[Partition 1]
     A --> D[Partition 2]
     
@@ -2099,7 +2201,9 @@ graph TD
 | Group ID | Rola | Konsumenci |
 |----------|------|------------|
 | `event-command-handler` | Przetwarza komendy | EventCommandHandler (1 instancja) |
-| `eventmaster-projectors-crdb` | Projektuje do CockroachDB | EventViewProjector (1-3 instancje) |
+| `eventmaster-projectors-crdb` | Projektuje do Read Model | EventViewProjector (1-3 instancje) |
+
+**Uwaga:** Nazwa grupy `eventmaster-projectors-crdb` jest historyczna (z czasów gdy planowaliśmy CockroachDB).
 
 **Skalowanie:**
 Jeśli mamy 3 partycje i 3 konsumentów w grupie:
@@ -2127,19 +2231,16 @@ Partition 0:
 [4] Message E
 ```
 
-**Jak Kafka zarządza offsetami?**
+**Jak Redpanda zarządza offsetami?**
 1. Consumer przetwarza wiadomość
 2. Consumer commituje offset (zapisuje do internal topicu `__consumer_offsets`)
 3. Jeśli consumer padnie, nowy consumer czyta od ostatniego commitowanego offsetu
 
 **Auto-commit vs Manual commit:**
 ```yaml
-# application.yml
-spring:
-  kafka:
-    consumer:
-      enable-auto-commit: true  # ← Domyślnie: auto-commit co 5s
-      auto-commit-interval: 5000
+# application.properties
+spring.kafka.consumer.enable-auto-commit=true
+spring.kafka.consumer.auto-commit-interval=5000  # 5 sekund
 ```
 
 EventMaster używa **auto-commit**, co jest OK dla:
@@ -2199,23 +2300,40 @@ graph TD
 
 ---
 
-### 9.5 Kafka w EventMaster - podsumowanie
+### 9.5 Redpanda w EventMaster - podsumowanie
 
-**Dlaczego Kafka, a nie np. RabbitMQ?**
+**Dlaczego Redpanda, a nie Apache Kafka lub RabbitMQ?**
 
-| Cecha | Kafka | RabbitMQ |
-|-------|-------|----------|
-| **Throughput** | Bardzo wysoki (miliony msg/s) | Średni |
-| **Persistence** | Tak, do dysku | Opcjonalne |
-| **Replay** | Tak (można wrócić do starego offsetu) | Nie |
-| **Ordering** | Gwarantowane w partycji | Gwarantowane w kolejce |
-| **Use case** | Event streaming, log aggregation | Task queues, RPC |
-| **Complexity** | Wyższa | Niższa |
+| Cecha | Redpanda | Apache Kafka | RabbitMQ |
+|-------|----------|--------------|----------|
+| **Throughput** | Bardzo wysoki | Bardzo wysoki | Średni |
+| **Persistence** | Tak, do dysku | Tak, do dysku | Opcjonalne |
+| **Replay** | Tak (można wrócić do starego offsetu) | Tak | Nie |
+| **Ordering** | Gwarantowane w partycji | Gwarantowane w partycji | Gwarantowane w kolejce |
+| **Use case** | Event streaming | Event streaming, log aggregation | Task queues, RPC |
+| **Setup** | Prosty (jeden proces) | Złożony (Kafka + Zookeeper) | Średni |
+| **API** | Kafka-compatible | Native | AMQP |
+| **Resources** | Mniej (C++) | Więcej (JVM) | Średnie |
 
-EventMaster używa Kafki, bo:
-1. **Event-Driven** - Idealna do Domain Events
-2. **Replay** - Możemy przebudować Read Model z historii
-3. **Skalowalność** - Przygotowanie na przyszłość (miliony eventów)
+**Dlaczego Redpanda?**
+1. **Kafka-compatible** - Ten sam API, te same biblioteki klienckie (Spring Kafka działa out-of-the-box)
+2. **Prostszy setup** - Nie wymaga Zookeeper, jeden proces
+3. **Lżejszy** - Mniejsze zużycie pamięci i CPU (napisany w C++)
+4. **Szybszy start** - Idealny do developmentu lokalnego
+5. **Event-Driven** - Idealna do Domain Events i CQRS
+6. **Replay** - Możemy przebudować Read Model z historii
+7. **Produkcyjny** - Gotowy do produkcji (używany przez firmy jak Vectorized)
+
+**Kiedy wybrać Apache Kafka zamiast Redpanda?**
+- Bardzo duża skala (setki węzłów)
+- Ekosystem narzędzi Confluent (Schema Registry, KSQL, Kafka Connect)
+- Legacy system już używa Kafki
+
+EventMaster używa Redpanda, bo:
+- ✅ Łatwiejszy w setup (MVP)
+- ✅ Kompatybilny z Kafka API (można przejść na Kafka bez zmian w kodzie!)
+- ✅ Niższe wymagania zasobów
+- ✅ Szybsz start (ważne w testach i developmencie)
 
 ---
 
@@ -2499,7 +2617,7 @@ docker/
 version: '3.8'
 
 services:
-  # === PostgreSQL (Write Model) ===
+  # === PostgreSQL (Write + Read Model) ===
   postgres:
     image: postgres:16
     environment:
@@ -2511,10 +2629,11 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user"]
+      test: ["CMD-SHELL", "pg_isready -U user -d eventmaster_db"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   # === Keycloak (Authorization Server) ===
   keycloak:
@@ -2522,24 +2641,50 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_IMPORT: /opt/keycloak/data/import/eventmaster-realm.json
+    volumes:
+      - ./realm-config:/opt/keycloak/data/import
     ports:
       - "8180:8080"
     command: start-dev
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-  # === CockroachDB (Read Model) ===
-  cockroachdb:
-    image: cockroachdb/cockroach:latest-v23.2
-    command: start-single-node --insecure
+  # === Redpanda (Message Broker - Kafka compatible) ===
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --smp 1
+      - --memory 1G
+      - --mode dev-container
+      - --default-log-level=info
     ports:
-      - "26257:26257"  # SQL
-      - "8081:8080"    # Admin UI
-    volumes:
-      - cockroachdb-data:/cockroach/cockroach-data
+      - "19092:19092"  # Kafka API (external)
+      - "18081:18081"  # Schema Registry
+      - "18082:18082"  # Pandaproxy (REST API)
+      - "9644:9644"    # Admin API
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # === Caddy (Reverse Proxy) ===
   caddy:
@@ -2555,9 +2700,17 @@ services:
 
 volumes:
   postgres-data:
-  cockroachdb-data:
   caddy-data:
 ```
+
+**Kluczowe zmiany względem klasycznego CQRS:**
+1. **Jedna baza PostgreSQL** zamiast PostgreSQL + CockroachDB
+   - Dwie tabele: `events` (Write) i `event_view` (Read)
+2. **Redpanda zamiast Apache Kafka**
+   - Kafka-compatible API
+   - Prostszy setup (brak Zookeeper)
+3. **Health checks** dla wszystkich serwisów
+4. **Keycloak realm auto-import** (Infrastructure as Code)
 
 **Uruchomienie:**
 ```bash
@@ -2672,6 +2825,8 @@ http://localhost:3000  (bezpośrednio Nuxt)
 
 **Architektura produkcyjna (Kubernetes):**
 
+**Uwaga:** Diagram poniżej przedstawia klasyczne rozdzielenie CQRS z dwiema bazami. W obecnej implementacji MVP używamy jednej PostgreSQL z dwiema tabelami, co można łatwo zmienić na ten model bez zmian w kodzie aplikacji.
+
 ```mermaid
 graph TB
     subgraph "Internet"
@@ -2695,15 +2850,15 @@ graph TB
             SPRING3[Spring Pod 3]
         end
         
-        subgraph "Kafka Cluster"
-            K1[Kafka Broker 1]
-            K2[Kafka Broker 2]
-            K3[Kafka Broker 3]
+        subgraph "Message Broker"
+            RP1[Redpanda Node 1]
+            RP2[Redpanda Node 2]
+            RP3[Redpanda Node 3]
         end
         
         subgraph "Databases"
-            PG[(PostgreSQL<br/>Write)]
-            CRDB[(CockroachDB<br/>Read)]
+            PG[(PostgreSQL<br/>Write Model<br/>tabela: events)]
+            PGREAD[(PostgreSQL Read Replicas<br/>Read Model<br/>tabela: event_view)]
         end
         
         subgraph "Auth"
@@ -2714,9 +2869,9 @@ graph TB
     USER --> ING
     ING --> NUXT1 & NUXT2 & NUXT3
     NUXT1 & NUXT2 & NUXT3 --> SPRING1 & SPRING2 & SPRING3
-    SPRING1 & SPRING2 & SPRING3 --> K1 & K2 & K3
+    SPRING1 & SPRING2 & SPRING3 --> RP1 & RP2 & RP3
     SPRING1 & SPRING2 & SPRING3 --> PG
-    SPRING1 & SPRING2 & SPRING3 --> CRDB
+    SPRING1 & SPRING2 & SPRING3 --> PGREAD
     SPRING1 & SPRING2 & SPRING3 --> KC
 ```
 
@@ -2724,10 +2879,15 @@ graph TB
 1. **Nginx Ingress** - Routing i Load Balancing
 2. **Frontend Pods** - 3 repliki Nuxt (horizontal scaling)
 3. **Backend Pods** - 3 repliki Spring Boot (horizontal scaling)
-4. **Kafka Cluster** - 3 brokery (high availability)
-5. **PostgreSQL** - Managed service (AWS RDS, Google Cloud SQL)
-6. **CockroachDB** - Multi-region cluster (3+ nodes)
+4. **Redpanda Cluster** - 3 nody (high availability, Kafka-compatible)
+5. **PostgreSQL Write** - Managed service (AWS RDS, Google Cloud SQL) dla Write Model
+6. **PostgreSQL Read Replicas** - Read replicas dla Read Model (można też osobna baza: MongoDB, CockroachDB)
 7. **Keycloak** - Clustered (2+ instances)
+
+**Możliwe ulepszenia produkcyjne:**
+- Rozdzielenie Write i Read Model na osobne fizyczne bazy (np. PostgreSQL Write + CockroachDB Read)
+- Multi-region deployment dla Read Model
+- Apache Kafka zamiast Redpanda dla bardzo dużej skali
 
 **Deployment manifest (przykład - Backend):**
 ```yaml
@@ -2752,11 +2912,11 @@ spec:
         - containerPort: 8080
         env:
         - name: SPRING_DATASOURCE_WRITE_URL
-          value: "jdbc:postgresql://postgres.example.com:5432/eventmaster_db"
+          value: "jdbc:postgresql://postgres-write.example.com:5432/eventmaster_db"
         - name: SPRING_DATASOURCE_READ_URL
-          value: "jdbc:postgresql://cockroachdb.example.com:26257/eventmaster_read"
+          value: "jdbc:postgresql://postgres-read.example.com:5432/eventmaster_db"  # Read replica lub osobna baza
         - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
-          value: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+          value: "redpanda-1:9092,redpanda-2:9092,redpanda-3:9092"
         resources:
           requests:
             memory: "512Mi"
@@ -2829,7 +2989,7 @@ spec:
 - **JWKS (JSON Web Key Set)** - Zbiór kluczy publicznych do walidacji JWT.
 
 ### K
-- **Kafka** - Rozproszona platforma streamingowa do przetwarzania zdarzeń.
+- **Kafka** - Rozproszona platforma streamingowa do przetwarzania zdarzeń (EventMaster używa Redpanda, która jest Kafka-compatible).
 
 ### M
 - **Message Broker** - System pośredniczący w wymianie wiadomości (Kafka).
@@ -2849,7 +3009,8 @@ spec:
 - **Query** - Zapytanie, żądanie odczytu danych.
 
 ### R
-- **Read Model** - Model zoptymalizowany pod odczyty (CockroachDB).
+- **Read Model** - Model zoptymalizowany pod odczyty. W EventMaster: tabela `event_view` w PostgreSQL.
+- **Redpanda** - Kafka-compatible message broker napisany w C++, lżejsza alternatywa dla Apache Kafka.
 - **Record (Java)** - Immutable klasa w Javie (od Java 14).
 - **Resource Server** - Serwer chroniący zasoby, walidujący tokeny (Spring Backend).
 - **Retry** - Ponowna próba wykonania operacji po błędzie.
@@ -2864,7 +3025,7 @@ spec:
 - **Transaction** - Grupa operacji wykonywanych atomowo.
 
 ### W
-- **Write Model** - Model zoptymalizowany pod zapisy (PostgreSQL).
+- **Write Model** - Model zoptymalizowany pod zapisy. W EventMaster: tabela `events` w PostgreSQL.
 
 ---
 
@@ -2893,7 +3054,21 @@ EventMaster to nowoczesna aplikacja demonstrująca architekturę CQRS w praktyce
 
 ---
 
+---
+
+## Historia zmian
+
+**2025-10-19** - Aktualizacja architektury:
+- Zmiana z dwóch baz danych (PostgreSQL + CockroachDB) na jedną bazę PostgreSQL z dwiema tabelami (`events` i `event_view`)
+- Zmiana z Apache Kafka na Redpanda (Kafka-compatible)
+- Uproszczenie nazwy topicu: `events.lifecycle` (wcześniej `domain.events.lifecycle`)
+- Dodanie szczegółowego opisu DataSource configuration dla Write i Read Model
+- Aktualizacja wszystkich diagramów i opisów zgodnie z faktyczną implementacją
+
+---
+
 **Dokument stworzony:** 2025-10-19  
-**Liczba słów:** ~12,500  
+**Ostatnia aktualizacja:** 2025-10-19
+**Liczba słów:** ~13,000  
 **Autor:** Zespół EventMaster
 

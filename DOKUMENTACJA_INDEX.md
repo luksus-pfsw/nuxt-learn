@@ -15,6 +15,41 @@ Kompletny przewodnik po dokumentacji projektu EventMaster.
 
 ## 📖 Wszystkie Dokumenty
 
+### 🎓 Ścieżka Nauki dla Testera (NOWY!)
+
+**[LEARNING_PATH_MICROSERVICES.md](LEARNING_PATH_MICROSERVICES.md)** (58 KB, ~6,200 słów)
+
+Kompleksowa ścieżka nauki Message-Driven i Event-Driven Architecture dla testera automatycznego.
+
+**Dla kogo:**
+- ✅ Tester automatyczny chcący rozumieć systemy rozproszone
+- ✅ QA Engineer szukający wiedzy o CQRS i Event Sourcing
+- ✅ Developer chcący poznać testowanie systemów asynchronicznych
+- ✅ Każdy, kto chce rozwijać EventMaster
+
+**Co zawiera:**
+- **50 tematów** podzielonych na 5 części
+- Każdy temat z:
+  - Definicją (wyjaśnioną jak dla 15-latka)
+  - Analogią ze świata rzeczywistego
+  - Praktycznym przykładem w EventMaster
+  - Kodem testów (perspektywa testera!)
+  - Pułapkami i best practices
+- Plan nauki 16-tygodniowy
+- Polecane książki (Vaughn Vernon, Addison-Wesley)
+- Roadmap rozwoju umiejętności
+
+**Części:**
+1. **Fundamenty** (1-10): Message-Driven, EDA, CQRS, Bounded Context, Aggregate
+2. **CQRS w Praktyce** (11-20): Projections, Read Models, Denormalization
+3. **Event Sourcing** (21-30): Event Store, Temporal Queries, Audit Log
+4. **Messaging & Kafka** (31-40): Kafka, Partitioning, Consumer Groups, DLQ
+5. **Testowanie & Operacje** (41-50): Testcontainers, Monitoring, Scaling
+
+**Najlepsze dla:** Głębokiego zrozumienia architektury systemów rozproszonych z perspektywy testera
+
+---
+
 ### 1️⃣ Główna Dokumentacja Architektury
 
 **[ARCHITEKTURA_SZCZEGOLOWA.md](ARCHITEKTURA_SZCZEGOLOWA.md)** (88 KB, ~11,000 słów)
@@ -284,6 +319,13 @@ Oryginalny code review i analiza architektury.
 ```
 1. ARCHITECTURE_SCALABILITY_REVIEW.md - Sekcja 2.1 (Scenariusz 1: Flash Sale) (10 min)
 2. Odpowiedź: TAK ✅ - Architektura jest perfekcyjnie zaprojektowana!
+### Scenariusz 8: "Jestem testerem i chcę nauczyć się architektury systemów rozproszonych"
+```
+1. LEARNING_PATH_MICROSERVICES.md - Cała ścieżka (6,200 słów, 2-3 h)
+2. Przejdź tematy 1-5 (Fundamenty) - praktykuj w EventMaster
+3. ARCHITEKTURA_SZCZEGOLOWA.md - Sprawdź implementację (30 min)
+4. Pisz testy dla każdego tematu! 💪
+5. Powtarzaj co tydzień kolejne tematy (16 tygodni total)
 ```
 
 ---
@@ -292,6 +334,7 @@ Oryginalny code review i analiza architektury.
 
 | Dokument | Rozmiar | Słowa | Cel | Czas czytania |
 |----------|---------|-------|-----|---------------|
+| LEARNING_PATH_MICROSERVICES.md | 58 KB | ~6,200 | Ścieżka nauki (50 tematów) | 2-3 h |
 | ARCHITEKTURA_SZCZEGOLOWA.md | 88 KB | ~11,000 | Dogłębne zrozumienie | 1-2 h |
 | ARCHITECTURE_SCALABILITY_REVIEW.md | 120 KB | ~8,000 | Roadmap i wizja SaaS | 45 min |
 | ARCHITECTURE_REVIEW.md | 27 KB | ~5,000 | Code review | 30 min |
@@ -301,7 +344,8 @@ Oryginalny code review i analiza architektury.
 | README.md | 7.9 KB | ~1,500 | Przegląd projektu | 10 min |
 | QUICK_START.md | 7.5 KB | ~1,400 | Uruchomienie | 5-10 min |
 | KLUCZOWE_POPRAWKI.md | 3.5 KB | ~700 | Szybki przegląd zmian | 5 min |
-| **RAZEM** | **284 KB** | **~33,500** | - | **4-5 h** |
+| SUMMARY.md | 8.7 KB | ~1,800 | Podsumowanie review | 15 min |
+| **RAZEM** | **342 KB** | **~39,700** | - | **6-8 h** |
 
 ---
 
@@ -372,6 +416,6 @@ Nie znalazłeś odpowiedzi w dokumentacji?
 
 ---
 
-**Data aktualizacji:** 2025-10-19  
-**Wersja dokumentacji:** 1.1  
-**Status:** ✅ Kompletna + Roadmap
+**Data aktualizacji:** 2025-01-19  
+**Wersja dokumentacji:** 1.2  
+**Status:** ✅ Kompletna + Roadmap + Ścieżka Nauki

@@ -1,0 +1,333 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    CZĘŚĆ VI: TESTOWANIE PRAKTYCZNE STOSU                      ║
+║                          EventMaster - 10 Lekcji                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          MAPA ZALEŻNOŚCI WIEDZY                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                             ┌─────────────────┐
+                             │   LEKCJA 51     │
+                             │  PostgreSQL 18  │
+                             │   (DATABASE)    │
+                             └────────┬────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    │                                   │
+              ┌─────▼──────┐                     ┌─────▼──────┐
+              │ LEKCJA 52  │                     │ LEKCJA 54  │
+              │  Keycloak  │                     │    Kafka   │
+              │   (AUTH)   │                     │ (MESSAGING)│
+              └─────┬──────┘                     └─────┬──────┘
+                    │                                  │
+              ┌─────▼──────┐                          │
+              │ LEKCJA 53  │                          │
+              │  Spring    │                          │
+              │  Security  │                          │
+              └─────┬──────┘                          │
+                    │                                  │
+                    └──────────┬───────────────────────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 55  │
+                         │   Nuxt 3   │
+                         │ (FRONTEND) │
+                         └─────┬──────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 56  │
+                         │   Caddy    │
+                         │  (GATEWAY) │
+                         └─────┬──────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 57  │
+                         │   Docker   │
+                         │  (INFRA)   │
+                         └─────┬──────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 58  │
+                         │    E2E     │
+                         │ (FULL STACK)│
+                         └─────┬──────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 59  │
+                         │Performance │
+                         │   (LOAD)   │
+                         └─────┬──────┘
+                               │
+                         ┌─────▼──────┐
+                         │ LEKCJA 60  │
+                         │ Production │
+                         │(MONITORING)│
+                         └────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        ARCHITEKTURA EVENTMASTER                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+    User
+     │
+     ▼
+┌─────────────────┐
+│   Browser       │
+│  (Playwright)   │ ◄────── Lekcja 58: E2E Testing
+└────────┬────────┘
+         │ HTTPS
+         ▼
+┌─────────────────┐
+│     Caddy       │
+│ (Reverse Proxy) │ ◄────── Lekcja 56: Gateway Testing
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌────────┐  ┌──────────┐
+│  Nuxt  │  │  Spring  │
+│   SSR  │  │   Boot   │
+└───┬────┘  └────┬─────┘
+    │            │
+    │            ▼
+    │       ┌──────────┐
+    │       │  Keycloak│ ◄────── Lekcja 52: Auth Testing
+    │       │  OAuth2  │
+    │       └──────────┘
+    │            │
+    │            ▼
+    │       ┌──────────┐
+    │       │Spring    │ ◄────── Lekcja 53: Security Testing
+    │       │Security  │
+    │       └────┬─────┘
+    │            │
+    │       ┌────┴────┐
+    │       │         │
+    │       ▼         ▼
+    │  ┌──────────┐ ┌──────────┐
+    │  │PostgreSQL│ │  Kafka   │
+    │  │    18    │ │   7.6    │
+    │  └──────────┘ └──────────┘
+    │       ▲            ▲
+    │       │            │
+    │       │            │
+    └───────┴────────────┴──────── Lekcja 51: DB Testing
+                                   Lekcja 54: Kafka Testing
+
+    Wszystko w Docker ──────────── Lekcja 57: Container Testing
+    
+    Metrics/Traces ────────────── Lekcja 60: Observability
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         TESTING PYRAMID - EVENTMASTER                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                              ╱╲
+                             ╱  ╲
+                            ╱ E2E╲                 10% - Lekcja 58
+                           ╱──────╲                Playwright
+                          ╱        ╲               Full Stack
+                         ╱──────────╲
+                        ╱            ╲             30% - Lekcje 51-57
+                       ╱ Integration  ╲            Testcontainers
+                      ╱────────────────╲           Component Testing
+                     ╱                  ╲
+                    ╱       Unit         ╲         60% - Części I-V
+                   ╱────────────────────── ╲        JUnit, Vitest
+                  ╱                        ╲       Business Logic
+                 ╱──────────────────────────╲
+                ▼                            ▼
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    NARZĘDZIA TESTOWE - MACIERZ                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────┬─────────────────┬──────────────────┬─────────────────┐
+│   Warstwa    │   Technologia   │   Test Tool      │    Lekcja       │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Database    │  PostgreSQL 18  │  Testcontainers  │      51         │
+│              │                 │  JdbcTemplate    │                 │
+│              │                 │  Flyway          │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Auth        │  Keycloak       │  TC Keycloak     │      52         │
+│              │                 │  Playwright      │                 │
+│              │                 │  RestAssured     │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Backend     │  Spring Boot    │  MockMvc         │      53         │
+│              │                 │  @WithMockJwt    │                 │
+│              │                 │  JUnit 5         │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Messaging   │  Kafka 7.6      │  EmbeddedKafka   │      54         │
+│              │                 │  TC Redpanda     │                 │
+│              │                 │  Avro Registry   │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Frontend    │  Nuxt 3         │  Vitest          │      55         │
+│              │                 │  Playwright      │                 │
+│              │                 │  axe-core        │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  Gateway     │  Caddy          │  curl            │      56         │
+│              │                 │  Gatling         │                 │
+│              │                 │  Docker          │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│Infrastructure│  Docker         │  docker-compose  │      57         │
+│              │                 │  health checks   │                 │
+│              │                 │  docker stats    │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│  E2E         │  Full Stack     │  Playwright      │      58         │
+│              │                 │  Page Object     │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│ Performance  │  Full Stack     │  Gatling         │      59         │
+│              │                 │  K6              │                 │
+│              │                 │  JMeter          │                 │
+├──────────────┼─────────────────┼──────────────────┼─────────────────┤
+│ Observability│  Monitoring     │  Prometheus      │      60         │
+│              │                 │  Grafana         │                 │
+│              │                 │  Jaeger          │                 │
+└──────────────┴─────────────────┴──────────────────┴─────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        ROADMAP IMPLEMENTACJI                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+FAZA 1: Fundament (Tydzień 1-2)
+────────────────────────────────
+  ┌─────────────┐     ┌─────────────┐
+  │  Lekcja 51  │ ──▶ │  Lekcja 57  │
+  │ PostgreSQL  │     │   Docker    │
+  └─────────────┘     └─────────────┘
+       ▲                     ▲
+       │                     │
+       └──── Testcontainers ─┘
+
+FAZA 2: Security & Messaging (Tydzień 3-4)
+───────────────────────────────────────────
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │  Lekcja 52  │ ──▶ │  Lekcja 53  │ ──▶ │  Lekcja 54  │
+  │  Keycloak   │     │   Spring    │     │    Kafka    │
+  └─────────────┘     └─────────────┘     └─────────────┘
+       │                     │                     │
+       └──────── OAuth2 Flow ──────────────────────┘
+
+FAZA 3: Full Stack (Tydzień 5)
+───────────────────────────────
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │  Lekcja 55  │ ──▶ │  Lekcja 56  │ ──▶ │  Lekcja 58  │
+  │   Nuxt 3    │     │    Caddy    │     │     E2E     │
+  └─────────────┘     └─────────────┘     └─────────────┘
+       │                     │                     │
+       └──────── User Journey ─────────────────────┘
+
+FAZA 4: Production (Tydzień 6)
+───────────────────────────────
+  ┌─────────────┐     ┌─────────────┐
+  │  Lekcja 59  │ ──▶ │  Lekcja 60  │
+  │ Performance │     │  Monitoring │
+  └─────────────┘     └─────────────┘
+       │                     │
+       └──── Production Ready ┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                   DESIGN PATTERNS - KATEGORIE                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Database Patterns (Lekcja 51):
+  ● Repository Pattern
+  ● Unit of Work
+  ● Optimistic Locking
+  ● Query Object
+
+Security Patterns (Lekcje 52-53):
+  ● Gateway Pattern
+  ● Token Introspection
+  ● Filter Chain
+  ● Strategy Pattern
+
+Messaging Patterns (Lekcja 54):
+  ● Competing Consumers
+  ● Idempotent Receiver
+  ● Transactional Outbox
+  ● Message Router
+
+Frontend Patterns (Lekcja 55):
+  ● BFF (Backend for Frontend)
+  ● Page Object Model
+  ● Composition API
+
+Infrastructure Patterns (Lekcje 56-57):
+  ● API Gateway
+  ● Circuit Breaker
+  ● Sidecar Pattern
+  ● Health Check Pattern
+
+Testing Patterns (Lekcje 58-60):
+  ● Screenplay Pattern
+  ● Test Data Builder
+  ● Retry Pattern
+  ● Bulkhead Pattern
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         SKILL PROGRESSION                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+PRZED CZĘŚĆ VI (Po CZĘŚĆ I-V):
+────────────────────────────────
+  CQRS/EDA       █████████████████████ 100% Expert
+  Event Sourcing █████████████████████ 100% Expert
+  Kafka          ████████░░░░░░░░░░░░░  40% Mid
+  PostgreSQL     ████████░░░░░░░░░░░░░  40% Mid
+  Spring Boot    ████████░░░░░░░░░░░░░  40% Mid
+  Keycloak       ██░░░░░░░░░░░░░░░░░░░  10% Beginner
+  Nuxt 3         ██░░░░░░░░░░░░░░░░░░░  10% Beginner
+  Caddy          ██░░░░░░░░░░░░░░░░░░░  10% Beginner
+  Docker         ████░░░░░░░░░░░░░░░░░  20% Junior
+  Observability  ████░░░░░░░░░░░░░░░░░  20% Junior
+
+PO CZĘŚCI VI:
+─────────────
+  CQRS/EDA       █████████████████████ 100% Expert
+  Event Sourcing █████████████████████ 100% Expert
+  Kafka          █████████████████████ 100% Expert ⬆
+  PostgreSQL     █████████████████████ 100% Expert ⬆
+  Spring Boot    █████████████████████ 100% Expert ⬆
+  Keycloak       ████████████████░░░░░  80% Senior ⬆
+  Nuxt 3         ████████████████░░░░░  80% Senior ⬆
+  Caddy          ████████████████░░░░░  80% Senior ⬆
+  Docker         ████████████████░░░░░  80% Senior ⬆
+  Observability  ████████████████░░░░░  80% Senior ⬆
+
+  POZIOM DOCELOWY: TEST ARCHITECT / SDET SENIOR
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              KPI TARGETS                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Test Coverage:
+  Backend (Unit + Integration)     ████████████████░░░░  80%+
+  Frontend (Unit + Component)      ██████████████░░░░░░  70%+
+  E2E (Critical Paths)             ████████████████████  100%
+
+Test Stability:
+  E2E Pass Rate                    ███████████████████░  95%+
+  Integration Pass Rate            ████████████████████  100%
+  Flaky Test Rate                  ░░░░░░░░░░░░░░░░░░░░   <1%
+
+Performance:
+  API Response Time (p99)          < 1s
+  Event Processing (p99)           < 600ms
+  Frontend Load Time (p75)         < 2s
+
+Production Readiness:
+  Monitoring Coverage              ████████████████████  100%
+  Alert Coverage (Critical)        ████████████████████  100%
+  Zero Critical Bugs               ✓ PASS
+
+═══════════════════════════════════════════════════════════════════════════════
+
+                          🎓 CZĘŚĆ VI GOTOWA!
+                     
+              Następny krok: Rozpocznij Lekcję 51
+                   (PostgreSQL 18 Testing)
+
+═══════════════════════════════════════════════════════════════════════════════

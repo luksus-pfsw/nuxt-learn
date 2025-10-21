@@ -347,13 +347,13 @@ Przykład:
 
 ---
 
-## 4. Kafka/Redpanda - Magistrala Zdarzeń
+## 4. Apache Kafka - Magistrala Zdarzeń
 
 ### 4.1 Co to jest Kafka?
 
-**Kafka** to system do przesyłania milionów wiadomości na sekundę między aplikacjami.
+**Apache Kafka** to rozproszona platforma do streamingu zdarzeń, pozwalająca na przesyłanie milionów wiadomości na sekundę między aplikacjami.
 
-**Redpanda** to "kompatybilny zamiennik" Kafki, ale szybszy i prostszy. EventMaster używa Redpanda.
+EventMaster używa Apache Kafka jako głównej magistrali komunikacyjnej między mikroserw isami.
 
 ### 4.2 Kluczowe Pojęcia
 
@@ -454,7 +454,7 @@ Backend powiadamia frontend, kiedy event jest gotowy.
 **Cel:** Zrozumieć przepływ komendy przez system.
 
 1. Uruchom aplikację: `docker-compose up`
-2. Zaloguj się do Redpanda Console: `http://localhost:9644`
+2. Zaloguj się do Kafka UI: `http://localhost:8080` (kafka-ui)
 3. Obserwuj topik `commands.events.create`
 4. W przeglądarce utwórz nowe wydarzenie
 5. Sprawdź, czy komenda pojawiła się w Kafce
@@ -519,7 +519,7 @@ void shouldNotCreateDuplicateEvents() {
 **Co nauczyliśmy się:**
 1. CQRS rozdziela zapis (Command) i odczyt (Query)
 2. Event-Driven Architecture komunikuje się przez wydarzenia
-3. Kafka/Redpanda to magistrala zdarzeń
+3. Apache Kafka to rozproszona magistrala zdarzeń
 4. Eventual Consistency oznacza krótkie opóźnienie między Write a Read
 5. Aggregate to główny obiekt biznesowy
 6. Projector aktualizuje Read Model na podstawie eventów

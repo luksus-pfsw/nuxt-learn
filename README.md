@@ -295,3 +295,26 @@ MIT License - możesz swobodnie używać w celach edukacyjnych i komercyjnych.
 **Autor:** EventMaster Team  
 **Data utworzenia:** 2025-10-19  
 **Status:** Development (MVP - Command Path + Query Path zaimplementowane)
+
+---
+
+## 🎓 WARSZTATY PRAKTYCZNE (Nowe!)
+
+**Format:** Architekt implementuje → Tester (TY!) piszesz testy  
+**Dokumentacja:** 
+
+📚 **[WARSZTATY PRAKTYCZNE - INDEKS](./learning-path/WARSZTATY_PRAKTYCZNE_INDEX.md)**
+
+### Rozpocznij tutaj:
+
+👉 **[LEKCJA 51 - WARSZTAT: PostgreSQL 18 Testing (Dzień 1)](./learning-path/CZESC_VI_LEKCJA_51_WARSZTAT.md)**
+
+**Format warsztatu:**
+1. **ARCHITEKT** tworzy kod (Backend/Frontend) - już zaimplementowane
+2. **TESTER (TY!)** piszesz testy - instrukcje krok po kroku
+3. **URUCHAMIASZ** testy (`./mvnw test`)
+4. **COMMIT** & przechodź do kolejnego dnia
+
+**Czas:** 5 dni × 3-4h = 1 tydzień na lekcję  
+**Cel:** Hands-on experience - od teorii do praktyki
+
